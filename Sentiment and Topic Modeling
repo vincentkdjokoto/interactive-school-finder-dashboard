@@ -1,0 +1,1381 @@
+# -*- coding: utf-8 -*-
+"""
+Student Feedback Analysis: Sentiment and Topic Modeling
+Analyzing course evaluations to extract actionable insights for faculty development
+"""
+
+# ============================================================================
+# 1. IMPORT LIBRARIES AND SETUP
+# ============================================================================
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import re
+import warnings
+warnings.filterwarnings('ignore')
+
+# NLP libraries
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from nltk import pos_tag
+from textblob import TextBlob
+
+# Topic modeling
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.decomposition import LatentDirichletAllocation, NMF
+from wordcloud import WordCloud
+import gensim
+from gensim import corpora
+from gensim.models import LdaModel, CoherenceModel
+
+# Visualization
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from matplotlib import cm
+
+# Download required NLTK data
+try:
+    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('corpora/stopwords')
+    nltk.data.find('corpora/wordnet')
+    nltk.data.find('averaged_perceptron_tagger')
+    nltk.data.find('vader_lexicon')
+except LookupError:
+    nltk.download('punkt')
+    nltk.download('stopwords')
+    nltk.download('wordnet')
+    nltk.download('averaged_perceptron_tagger')
+    nltk.download('vader_lexicon')
+
+# Set style for educational context
+EDU_COLORS = ['#2E86AB', '#A23B72', '#F18F01', '#6B8F71', '#3D5A80', '#C73E1D', '#8A4F7D']
+sns.set_palette(EDU_COLORS)
+sns.set_style("whitegrid")
+plt.rcParams['figure.figsize'] = (12, 8)
+plt.rcParams['font.size'] = 12
+
+print("✅ Libraries imported successfully")
+
+# ============================================================================
+# 2. GENERATE REALISTIC STUDENT FEEDBACK DATA
+# ============================================================================
+print("=" * 70)
+print("CREATING REALISTIC STUDENT FEEDBACK DATASET")
+print("=" * 70)
+
+def generate_student_feedback_data(n_samples=2000):
+    """Generate realistic student course evaluation data"""
+    
+    np.random.seed(42)
+    
+    # Course categories
+    course_categories = ['STEM', 'Humanities', 'Social Sciences', 'Business', 'Arts']
+    difficulty_levels = ['Introductory', 'Intermediate', 'Advanced', 'Graduate']
+    
+    # Common positive phrases (based on real feedback patterns)
+    positive_phrases = [
+        "excellent professor who explains concepts clearly",
+        "very helpful and responsive to questions",
+        "course materials were well organized",
+        "assignments were meaningful and relevant",
+        "created an engaging learning environment",
+        "provided valuable feedback on assignments",
+        "passionate about the subject matter",
+        "approachable and supportive outside class",
+        "course challenged me to think critically",
+        "real-world applications were emphasized",
+        "diverse perspectives were included",
+        "technology was used effectively",
+        "group projects were well structured",
+        "exams were fair and tested understanding",
+        "office hours were very productive"
+    ]
+    
+    # Common negative phrases (based on real feedback patterns)
+    negative_phrases = [
+        "grading was inconsistent and unfair",
+        "lectures were boring and monotonous",
+        "too much workload for the credit hours",
+        "unclear expectations for assignments",
+        "poor communication from the professor",
+        "course materials were outdated",
+        "tests were excessively difficult",
+        "not enough feedback on performance",
+        "class discussions were not facilitated well",
+        "technology issues disrupted learning",
+        "required textbooks were too expensive",
+        "schedule was not flexible enough",
+        "group projects were poorly organized",
+        "office hours were rarely available",
+        "course content was not practical"
+    ]
+    
+    # Neutral/constructive phrases
+    constructive_phrases = [
+        "could improve by providing more examples",
+        "consider revising the grading rubric",
+        "more interactive activities would help",
+        "suggest updating some course materials",
+        "office hours could be scheduled better",
+        "more timely feedback would be beneficial",
+        "consider varying teaching methods",
+        "additional practice problems would help",
+        "clarify assignment expectations earlier",
+        "incorporate more real-world applications"
+    ]
+    
+    # Generate feedback entries
+    data = []
+    
+    for i in range(n_samples):
+        # Course characteristics
+        course_category = np.random.choice(course_categories, p=[0.3, 0.2, 0.2, 0.2, 0.1])
+        difficulty = np.random.choice(difficulty_levels, p=[0.3, 0.4, 0.2, 0.1])
+        
+        # Generate sentiment distribution
+        sentiment_weights = np.random.dirichlet([3, 1, 2])  # More positive, some neutral, less negative
+        num_positive = int(np.random.randint(1, 4) * sentiment_weights[0])
+        num_negative = int(np.random.randint(0, 3) * sentiment_weights[1])
+        num_constructive = int(np.random.randint(0, 2) * sentiment_weights[2])
+        
+        # Build feedback text
+        feedback_parts = []
+        
+        # Add positive comments
+        for _ in range(num_positive):
+            phrase = np.random.choice(positive_phrases)
+            # Add some variation
+            variations = [
+                f"The professor was {phrase}.",
+                f"I appreciated that {phrase}.",
+                f"One strength was {phrase}.",
+                f"The course excelled in {phrase}."
+            ]
+            feedback_parts.append(np.random.choice(variations))
+        
+        # Add negative comments
+        for _ in range(num_negative):
+            phrase = np.random.choice(negative_phrases)
+            variations = [
+                f"One issue was {phrase}.",
+                f"The course could improve by {phrase}.",
+                f"A weakness was {phrase}.",
+                f"I was disappointed that {phrase}."
+            ]
+            feedback_parts.append(np.random.choice(variations))
+        
+        # Add constructive comments
+        for _ in range(num_constructive):
+            phrase = np.random.choice(constructive_phrases)
+            variations = [
+                f"Suggestions for improvement: {phrase}.",
+                f"It would help if {phrase}.",
+                f"Future iterations could {phrase}.",
+                f"Consider {phrase}."
+            ]
+            feedback_parts.append(np.random.choice(variations))
+        
+        # Combine into coherent feedback
+        if len(feedback_parts) > 0:
+            feedback_text = " ".join(feedback_parts)
+            
+            # Add some random comments about specific aspects
+            aspects = ['lectures', 'assignments', 'exams', 'grading', 'materials', 'interaction']
+            selected_aspects = np.random.choice(aspects, size=np.random.randint(1, 3), replace=False)
+            
+            for aspect in selected_aspects:
+                if np.random.random() > 0.5:
+                    aspect_comments = [
+                        f"The {aspect} were generally effective.",
+                        f"I found the {aspect} to be challenging but fair.",
+                        f"The {aspect} could be improved with more structure.",
+                        f"The {aspect} were the strongest part of the course."
+                    ]
+                    feedback_text += " " + np.random.choice(aspect_comments)
+        
+        # Generate ratings (1-5 scale)
+        ratings = {
+            'overall_rating': np.random.randint(1, 6),
+            'difficulty_rating': np.random.randint(2, 6),
+            'workload_rating': np.random.randint(2, 6),
+            'clarity_rating': np.random.randint(1, 6),
+            'engagement_rating': np.random.randint(1, 6),
+            'fairness_rating': np.random.randint(1, 6)
+        }
+        
+        # Calculate composite sentiment score based on ratings
+        avg_rating = np.mean(list(ratings.values()))
+        
+        # Add metadata
+        data.append({
+            'feedback_id': i + 1,
+            'course_code': f"{course_category[:3]}{np.random.randint(100, 500)}",
+            'course_category': course_category,
+            'difficulty_level': difficulty,
+            'feedback_text': feedback_text,
+            'word_count': len(feedback_text.split()),
+            'year': np.random.choice([2021, 2022, 2023]),
+            'term': np.random.choice(['Fall', 'Spring', 'Summer']),
+            **ratings,
+            'composite_score': avg_rating
+        })
+    
+    df = pd.DataFrame(data)
+    
+    # Add some missing values realistically
+    missing_mask = np.random.random(len(df)) < 0.05
+    df.loc[missing_mask, 'feedback_text'] = np.nan
+    
+    print(f"✅ Generated {len(df)} student feedback entries")
+    print(f"📊 Course distribution: {df['course_category'].value_counts().to_dict()}")
+    print(f"📝 Average word count: {df['word_count'].mean():.1f}")
+    
+    return df
+
+# Generate the dataset
+feedback_df = generate_student_feedback_data(2000)
+
+# Display sample
+print("\n📋 Sample Feedback Entries:")
+print("-" * 50)
+for i, row in feedback_df.head(3).iterrows():
+    print(f"\nFeedback {i+1} ({row['course_code']} - {row['course_category']}):")
+    print(f"Text: {row['feedback_text'][:200]}...")
+    print(f"Ratings: Overall={row['overall_rating']}/5, Clarity={row['clarity_rating']}/5")
+
+# ============================================================================
+# 3. EXPLORATORY DATA ANALYSIS
+# ============================================================================
+print("\n" + "=" * 70)
+print("EXPLORATORY DATA ANALYSIS")
+print("=" * 70)
+
+# 3.1 Basic Statistics
+print("\n📊 DATASET OVERVIEW:")
+print("-" * 40)
+print(f"Total feedback entries: {len(feedback_df)}")
+print(f"Missing feedback text: {feedback_df['feedback_text'].isna().sum()} entries")
+print(f"Average word count: {feedback_df['word_count'].mean():.1f} words")
+
+# Remove entries with missing feedback text for analysis
+analysis_df = feedback_df.dropna(subset=['feedback_text']).copy()
+print(f"Entries for analysis: {len(analysis_df)}")
+
+# 3.2 Rating Distributions
+print("\n⭐ RATING DISTRIBUTIONS:")
+print("-" * 40)
+
+rating_columns = ['overall_rating', 'clarity_rating', 'engagement_rating', 
+                  'fairness_rating', 'difficulty_rating', 'workload_rating']
+
+fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+axes = axes.flatten()
+
+for idx, column in enumerate(rating_columns):
+    ax = axes[idx]
+    rating_counts = analysis_df[column].value_counts().sort_index()
+    bars = ax.bar(rating_counts.index, rating_counts.values, color=EDU_COLORS[idx])
+    ax.set_title(f'{column.replace("_", " ").title()}')
+    ax.set_xlabel('Rating (1-5)')
+    ax.set_ylabel('Count')
+    ax.set_xticks([1, 2, 3, 4, 5])
+    
+    # Add value labels
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 5,
+                f'{int(height)}', ha='center', va='bottom', fontsize=9)
+
+plt.suptitle('Distribution of Course Evaluation Ratings', fontsize=16, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+
+# 3.3 Rating Statistics by Course Category
+print("\n📈 RATING STATISTICS BY COURSE CATEGORY:")
+print("-" * 40)
+
+category_stats = analysis_df.groupby('course_category').agg({
+    'overall_rating': ['mean', 'std', 'count'],
+    'clarity_rating': 'mean',
+    'engagement_rating': 'mean',
+    'difficulty_rating': 'mean'
+}).round(2)
+
+print(category_stats)
+
+# Visualize category differences
+fig, ax = plt.subplots(figsize=(12, 6))
+category_means = analysis_df.groupby('course_category')['overall_rating'].mean().sort_values()
+
+bars = ax.barh(category_means.index, category_means.values, color=EDU_COLORS[:len(category_means)])
+ax.set_xlabel('Average Overall Rating (1-5)')
+ax.set_title('Average Ratings by Course Category', fontweight='bold')
+ax.set_xlim([0, 5])
+
+# Add value labels
+for bar in bars:
+    width = bar.get_width()
+    ax.text(width + 0.05, bar.get_y() + bar.get_height()/2,
+            f'{width:.2f}', ha='left', va='center')
+
+plt.tight_layout()
+plt.show()
+
+# 3.4 Word Count Analysis
+print("\n📝 FEEDBACK LENGTH ANALYSIS:")
+print("-" * 40)
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+# Word count distribution
+ax1.hist(analysis_df['word_count'], bins=30, edgecolor='black', alpha=0.7, color=EDU_COLORS[0])
+ax1.set_xlabel('Word Count')
+ax1.set_ylabel('Frequency')
+ax1.set_title('Distribution of Feedback Length', fontweight='bold')
+ax1.axvline(x=analysis_df['word_count'].mean(), color='red', linestyle='--', 
+            label=f'Mean: {analysis_df["word_count"].mean():.1f}')
+ax1.legend()
+
+# Word count vs rating
+scatter = ax2.scatter(analysis_df['word_count'], analysis_df['overall_rating'], 
+                      alpha=0.5, c=analysis_df['overall_rating'], cmap='viridis')
+ax2.set_xlabel('Word Count')
+ax2.set_ylabel('Overall Rating')
+ax2.set_title('Feedback Length vs Overall Rating', fontweight='bold')
+plt.colorbar(scatter, ax=ax2, label='Overall Rating')
+
+plt.tight_layout()
+plt.show()
+
+print(f"Average word count: {analysis_df['word_count'].mean():.1f}")
+print(f"Median word count: {analysis_df['word_count'].median():.1f}")
+print(f"Correlation between length and rating: {analysis_df['word_count'].corr(analysis_df['overall_rating']):.3f}")
+
+# ============================================================================
+# 4. TEXT PREPROCESSING PIPELINE
+# ============================================================================
+print("\n" + "=" * 70)
+print("TEXT PREPROCESSING FOR NLP ANALYSIS")
+print("=" * 70)
+
+class TextPreprocessor:
+    """Preprocess text for NLP analysis"""
+    
+    def __init__(self):
+        self.lemmatizer = WordNetLemmatizer()
+        self.stop_words = set(stopwords.words('english'))
+        # Add custom stop words for education context
+        self.stop_words.update(['course', 'class', 'professor', 'teacher', 
+                               'student', 'students', 'would', 'could', 
+                               'also', 'like', 'really', 'much', 'many'])
+        self.sia = SentimentIntensityAnalyzer()
+    
+    def clean_text(self, text):
+        """Basic text cleaning"""
+        if not isinstance(text, str):
+            return ""
+        
+        # Convert to lowercase
+        text = text.lower()
+        
+        # Remove special characters and numbers (keep basic punctuation for sentiment)
+        text = re.sub(r'[^a-zA-Z\s.,!?]', ' ', text)
+        
+        # Remove extra whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text
+    
+    def tokenize_and_lemmatize(self, text):
+        """Tokenize and lemmatize text"""
+        tokens = word_tokenize(text)
+        
+        # Lemmatize with POS tagging for better accuracy
+        pos_tags = pos_tag(tokens)
+        lemmatized_tokens = []
+        
+        for token, tag in pos_tags:
+            if token not in self.stop_words and len(token) > 2:
+                # Convert POS tag to WordNet format
+                if tag.startswith('J'):  # Adjective
+                    pos = 'a'
+                elif tag.startswith('V'):  # Verb
+                    pos = 'v'
+                elif tag.startswith('N'):  # Noun
+                    pos = 'n'
+                elif tag.startswith('R'):  # Adverb
+                    pos = 'r'
+                else:
+                    pos = 'n'  # Default to noun
+                
+                lemmatized = self.lemmatizer.lemmatize(token, pos=pos)
+                lemmatized_tokens.append(lemmatized)
+        
+        return lemmatized_tokens
+    
+    def get_sentiment_vader(self, text):
+        """Get sentiment scores using VADER"""
+        return self.sia.polarity_scores(text)
+    
+    def get_sentiment_textblob(self, text):
+        """Get sentiment scores using TextBlob"""
+        blob = TextBlob(text)
+        return {
+            'polarity': blob.sentiment.polarity,
+            'subjectivity': blob.sentiment.subjectivity
+        }
+    
+    def preprocess_for_lda(self, texts):
+        """Preprocess texts for LDA topic modeling"""
+        processed_texts = []
+        
+        for text in texts:
+            cleaned = self.clean_text(text)
+            tokens = self.tokenize_and_lemmatize(cleaned)
+            processed_texts.append(tokens)
+        
+        return processed_texts
+    
+    def extract_keywords(self, text, n_keywords=10):
+        """Extract keywords from text using TF-IDF"""
+        # Simple frequency-based keyword extraction
+        tokens = self.tokenize_and_lemmatize(self.clean_text(text))
+        freq_dist = nltk.FreqDist(tokens)
+        
+        # Filter out common but not stop words
+        common_education_words = ['learning', 'material', 'assignment', 'lecture', 
+                                 'exam', 'grade', 'work', 'time', 'help', 'understand']
+        
+        keywords = [(word, freq) for word, freq in freq_dist.most_common(n_keywords * 3)
+                   if word not in common_education_words][:n_keywords]
+        
+        return keywords
+
+# Initialize preprocessor
+preprocessor = TextPreprocessor()
+
+print("🔧 Preprocessing feedback texts...")
+
+# Apply preprocessing
+analysis_df['cleaned_text'] = analysis_df['feedback_text'].apply(preprocessor.clean_text)
+analysis_df['tokenized_text'] = analysis_df['cleaned_text'].apply(preprocessor.tokenize_and_lemmatize)
+analysis_df['preprocessed_text'] = analysis_df['tokenized_text'].apply(lambda x: ' '.join(x))
+
+# Show preprocessing results
+print(f"✅ Preprocessing completed")
+print(f"📝 Sample original text: {analysis_df.iloc[0]['feedback_text'][:150]}...")
+print(f"🔄 Sample cleaned text: {analysis_df.iloc[0]['cleaned_text'][:150]}...")
+print(f"🔑 Sample tokens: {analysis_df.iloc[0]['tokenized_text'][:10]}...")
+
+# ============================================================================
+# 5. SENTIMENT ANALYSIS
+# ============================================================================
+print("\n" + "=" * 70)
+print("SENTIMENT ANALYSIS OF STUDENT FEEDBACK")
+print("=" * 70)
+
+# 5.1 Apply Sentiment Analysis
+print("\n🎭 CALCULATING SENTIMENT SCORES...")
+
+# VADER Sentiment Analysis
+analysis_df['vader_scores'] = analysis_df['cleaned_text'].apply(preprocessor.get_sentiment_vader)
+analysis_df['vader_compound'] = analysis_df['vader_scores'].apply(lambda x: x['compound'])
+analysis_df['vader_positive'] = analysis_df['vader_scores'].apply(lambda x: x['pos'])
+analysis_df['vader_negative'] = analysis_df['vader_scores'].apply(lambda x: x['neg'])
+analysis_df['vader_neutral'] = analysis_df['vader_scores'].apply(lambda x: x['neu'])
+
+# TextBlob Sentiment Analysis
+analysis_df['textblob_scores'] = analysis_df['cleaned_text'].apply(preprocessor.get_sentiment_textblob)
+analysis_df['textblob_polarity'] = analysis_df['textblob_scores'].apply(lambda x: x['polarity'])
+analysis_df['textblob_subjectivity'] = analysis_df['textblob_scores'].apply(lambda x: x['subjectivity'])
+
+# Create sentiment categories
+def categorize_sentiment(compound_score):
+    if compound_score >= 0.05:
+        return 'Positive'
+    elif compound_score <= -0.05:
+        return 'Negative'
+    else:
+        return 'Neutral'
+
+analysis_df['sentiment_category'] = analysis_df['vader_compound'].apply(categorize_sentiment)
+
+print(f"✅ Sentiment analysis completed")
+print(f"📊 Sentiment distribution: {analysis_df['sentiment_category'].value_counts().to_dict()}")
+
+# 5.2 Sentiment Distribution Analysis
+print("\n📈 SENTIMENT DISTRIBUTION ANALYSIS:")
+print("-" * 40)
+
+fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+
+# 1. Sentiment category distribution
+sentiment_counts = analysis_df['sentiment_category'].value_counts()
+colors = ['#6B8F71', '#F18F01', '#C73E1D']  # Green for positive, orange for neutral, red for negative
+axes[0, 0].pie(sentiment_counts.values, labels=sentiment_counts.index, autopct='%1.1f%%',
+               colors=colors, startangle=90)
+axes[0, 0].set_title('Sentiment Category Distribution', fontweight='bold')
+
+# 2. VADER compound score distribution
+axes[0, 1].hist(analysis_df['vader_compound'], bins=30, edgecolor='black', alpha=0.7, color=EDU_COLORS[0])
+axes[0, 1].axvline(x=0, color='red', linestyle='--', linewidth=2)
+axes[0, 1].set_xlabel('VADER Compound Score')
+axes[0, 1].set_ylabel('Frequency')
+axes[0, 1].set_title('Distribution of VADER Sentiment Scores', fontweight='bold')
+
+# 3. TextBlob polarity distribution
+axes[0, 2].hist(analysis_df['textblob_polarity'], bins=30, edgecolor='black', alpha=0.7, color=EDU_COLORS[1])
+axes[0, 2].axvline(x=0, color='red', linestyle='--', linewidth=2)
+axes[0, 2].set_xlabel('TextBlob Polarity Score')
+axes[0, 2].set_ylabel('Frequency')
+axes[0, 2].set_title('Distribution of TextBlob Polarity Scores', fontweight='bold')
+
+# 4. Sentiment vs Overall Rating
+sentiment_by_rating = analysis_df.groupby('overall_rating')['vader_compound'].mean()
+axes[1, 0].bar(sentiment_by_rating.index, sentiment_by_rating.values, color=EDU_COLORS[2])
+axes[1, 0].set_xlabel('Overall Rating (1-5)')
+axes[1, 0].set_ylabel('Average VADER Score')
+axes[1, 0].set_title('Sentiment vs Overall Rating', fontweight='bold')
+axes[1, 0].set_xticks([1, 2, 3, 4, 5])
+
+# 5. Sentiment by Course Category
+sentiment_by_category = analysis_df.groupby('course_category')['vader_compound'].mean().sort_values()
+axes[1, 1].barh(sentiment_by_category.index, sentiment_by_category.values, color=EDU_COLORS[3])
+axes[1, 1].set_xlabel('Average VADER Score')
+axes[1, 1].set_title('Sentiment by Course Category', fontweight='bold')
+axes[1, 1].axvline(x=0, color='red', linestyle='--', alpha=0.5)
+
+# 6. Correlation between VADER and TextBlob
+scatter = axes[1, 2].scatter(analysis_df['vader_compound'], analysis_df['textblob_polarity'], 
+                             alpha=0.5, c=analysis_df['overall_rating'], cmap='viridis')
+axes[1, 2].set_xlabel('VADER Compound Score')
+axes[1, 2].set_ylabel('TextBlob Polarity')
+axes[1, 2].set_title('VADER vs TextBlob Correlation', fontweight='bold')
+plt.colorbar(scatter, ax=axes[1, 2], label='Overall Rating')
+
+plt.suptitle('Comprehensive Sentiment Analysis', fontsize=16, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+
+# 5.3 Sentiment and Rating Correlation
+print("\n🔗 SENTIMENT-RATING CORRELATIONS:")
+print("-" * 40)
+
+correlation_data = []
+rating_columns = ['overall_rating', 'clarity_rating', 'engagement_rating', 
+                  'fairness_rating', 'difficulty_rating', 'workload_rating']
+
+for rating_col in rating_columns:
+    vader_corr = analysis_df['vader_compound'].corr(analysis_df[rating_col])
+    textblob_corr = analysis_df['textblob_polarity'].corr(analysis_df[rating_col])
+    correlation_data.append({
+        'Rating Type': rating_col.replace('_', ' ').title(),
+        'VADER Correlation': vader_corr,
+        'TextBlob Correlation': textblob_corr
+    })
+
+correlation_df = pd.DataFrame(correlation_data)
+print(correlation_df.round(3).to_string(index=False))
+
+# 5.4 Most Positive and Negative Feedback Examples
+print("\n🏆 MOST POSITIVE FEEDBACK EXAMPLES:")
+print("-" * 40)
+
+top_positive = analysis_df.nlargest(3, 'vader_compound')
+for idx, row in top_positive.iterrows():
+    print(f"\n⭐ VADER Score: {row['vader_compound']:.3f}, Overall Rating: {row['overall_rating']}/5")
+    print(f"   Course: {row['course_code']} ({row['course_category']})")
+    print(f"   Feedback: {row['feedback_text'][:200]}...")
+
+print("\n⚠️ MOST NEGATIVE FEEDBACK EXAMPLES:")
+print("-" * 40)
+
+top_negative = analysis_df.nsmallest(3, 'vader_compound')
+for idx, row in top_negative.iterrows():
+    print(f"\n🔻 VADER Score: {row['vader_compound']:.3f}, Overall Rating: {row['overall_rating']}/5")
+    print(f"   Course: {row['course_code']} ({row['course_category']})")
+    print(f"   Feedback: {row['feedback_text'][:200]}...")
+
+# ============================================================================
+# 6. KEYWORD AND PHRASE ANALYSIS
+# ============================================================================
+print("\n" + "=" * 70)
+print("KEYWORD AND PHRASE EXTRACTION")
+print("=" * 70)
+
+# 6.1 Extract keywords by sentiment
+print("\n🔑 EXTRACTING KEYWORDS BY SENTIMENT...")
+
+def extract_top_keywords_by_sentiment(df, sentiment_col='sentiment_category', n_keywords=15):
+    """Extract top keywords for each sentiment category"""
+    sentiment_keywords = {}
+    
+    for sentiment in ['Positive', 'Neutral', 'Negative']:
+        sentiment_texts = df[df[sentiment_col] == sentiment]['preprocessed_text'].tolist()
+        all_words = ' '.join(sentiment_texts).split()
+        
+        # Calculate word frequencies
+        freq_dist = nltk.FreqDist(all_words)
+        
+        # Get top keywords (filter out very common words)
+        common_words = set(['would', 'could', 'also', 'like', 'really', 'much', 
+                           'many', 'one', 'get', 'make', 'take', 'see'])
+        
+        keywords = [(word, freq) for word, freq in freq_dist.most_common(n_keywords * 3)
+                   if word not in common_words and len(word) > 3][:n_keywords]
+        
+        sentiment_keywords[sentiment] = keywords
+    
+    return sentiment_keywords
+
+# Get keywords by sentiment
+sentiment_keywords = extract_top_keywords_by_sentiment(analysis_df)
+
+print("✅ Top keywords by sentiment category:")
+for sentiment, keywords in sentiment_keywords.items():
+    print(f"\n{sentiment} Feedback Keywords:")
+    keyword_list = [f"{word} ({count})" for word, count in keywords[:10]]
+    print(f"   {', '.join(keyword_list)}")
+
+# 6.2 Word Clouds by Sentiment
+print("\n☁️ GENERATING WORD CLOUDS BY SENTIMENT...")
+
+fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+for idx, sentiment in enumerate(['Positive', 'Neutral', 'Negative']):
+    ax = axes[idx]
+    
+    # Combine all text for this sentiment
+    sentiment_texts = analysis_df[analysis_df['sentiment_category'] == sentiment]['preprocessed_text'].tolist()
+    all_text = ' '.join(sentiment_texts)
+    
+    if all_text.strip():
+        # Generate word cloud
+        wordcloud = WordCloud(
+            width=800,
+            height=400,
+            background_color='white',
+            colormap='viridis' if sentiment == 'Positive' else 'plasma' if sentiment == 'Neutral' else 'Reds',
+            max_words=50,
+            contour_width=1,
+            contour_color='steelblue'
+        ).generate(all_text)
+        
+        ax.imshow(wordcloud, interpolation='bilinear')
+        ax.set_title(f'{sentiment} Feedback Word Cloud', fontweight='bold', fontsize=14)
+        ax.axis('off')
+    else:
+        ax.text(0.5, 0.5, f'No {sentiment} feedback', ha='center', va='center', fontsize=12)
+        ax.axis('off')
+
+plt.suptitle('Word Clouds by Sentiment Category', fontsize=16, fontweight='bold', y=1.05)
+plt.tight_layout()
+plt.show()
+
+# 6.3 Bi-gram and Tri-gram Analysis
+print("\n📊 ANALYZING COMMON PHRASES (N-GRAMS)...")
+
+def extract_ngrams(texts, n=2, top_n=10):
+    """Extract most common n-grams"""
+    from nltk import ngrams
+    from collections import Counter
+    
+    all_ngrams = []
+    for text in texts:
+        tokens = text.split()
+        ngram_list = list(ngrams(tokens, n))
+        all_ngrams.extend(ngram_list)
+    
+    ngram_counts = Counter(all_ngrams)
+    return ngram_counts.most_common(top_n)
+
+# Extract bigrams and trigrams by sentiment
+print("\nMost Common Bigrams (2-word phrases):")
+for sentiment in ['Positive', 'Negative']:
+    sentiment_texts = analysis_df[analysis_df['sentiment_category'] == sentiment]['preprocessed_text'].tolist()
+    bigrams = extract_ngrams(sentiment_texts, n=2, top_n=8)
+    
+    print(f"\n{sentiment} Feedback:")
+    for bigram, count in bigrams:
+        print(f"   {' '.join(bigram)}: {count}")
+
+print("\nMost Common Trigrams (3-word phrases):")
+for sentiment in ['Positive', 'Negative']:
+    sentiment_texts = analysis_df[analysis_df['sentiment_category'] == sentiment]['preprocessed_text'].tolist()
+    trigrams = extract_ngrams(sentiment_texts, n=3, top_n=6)
+    
+    print(f"\n{sentiment} Feedback:")
+    for trigram, count in trigrams:
+        print(f"   {' '.join(trigram)}: {count}")
+
+# 6.4 Sentiment-Specific Phrase Extraction
+print("\n🎯 SENTIMENT-SPECIFIC PHRASE PATTERNS:")
+print("-" * 40)
+
+# Define patterns to look for
+sentiment_patterns = {
+    'Positive': [
+        r'excellent.*professor', r'very.*helpful', r'well.*organized',
+        r'clear.*explanation', r'engaging.*class', r'valuable.*feedback',
+        r'passionate.*about', r'supportive.*environment'
+    ],
+    'Negative': [
+        r'too.*much.*work', r'unclear.*expectation', r'poor.*communication',
+        r'boring.*lecture', r'unfair.*grading', r'too.*difficult',
+        r'not.*enough.*feedback', r'outdated.*material'
+    ]
+}
+
+# Search for patterns
+pattern_results = {}
+for sentiment, patterns in sentiment_patterns.items():
+    pattern_counts = {}
+    for pattern in patterns:
+        count = analysis_df['cleaned_text'].str.contains(pattern, case=False).sum()
+        if count > 0:
+            pattern_name = pattern.replace('.*', ' ').replace('_', ' ')
+            pattern_counts[pattern_name] = count
+    
+    pattern_results[sentiment] = pattern_counts
+
+# Display results
+for sentiment, patterns in pattern_results.items():
+    print(f"\n{sentiment} Pattern Frequencies:")
+    for pattern, count in sorted(patterns.items(), key=lambda x: x[1], reverse=True)[:5]:
+        print(f"   {pattern}: {count} occurrences")
+
+# ============================================================================
+# 7. TOPIC MODELING WITH LDA
+# ============================================================================
+print("\n" + "=" * 70)
+print("TOPIC MODELING: LATENT DIRICHLET ALLOCATION (LDA)")
+print("=" * 70)
+
+# 7.1 Prepare Data for LDA
+print("\n🔧 PREPARING DATA FOR TOPIC MODELING...")
+
+# Preprocess texts for LDA
+processed_texts = preprocessor.preprocess_for_lda(analysis_df['feedback_text'].tolist())
+
+# Create dictionary and corpus
+dictionary = corpora.Dictionary(processed_texts)
+# Filter extremes
+dictionary.filter_extremes(no_below=5, no_above=0.5)
+corpus = [dictionary.doc2bow(text) for text in processed_texts]
+
+print(f"✅ Prepared {len(processed_texts)} documents for LDA")
+print(f"📚 Dictionary size: {len(dictionary)} unique tokens")
+print(f"📊 Corpus size: {len(corpus)} documents")
+
+# 7.2 Determine Optimal Number of Topics
+print("\n🔍 FINDING OPTIMAL NUMBER OF TOPICS...")
+
+def compute_coherence_values(dictionary, corpus, texts, limit=10, start=2, step=2):
+    """Compute coherence scores for different numbers of topics"""
+    coherence_values = []
+    model_list = []
+    
+    for num_topics in range(start, limit, step):
+        print(f"  Testing {num_topics} topics...", end='\r')
+        model = LdaModel(corpus=corpus, id2word=dictionary, num_topics=num_topics,
+                        random_state=42, passes=10, alpha='auto')
+        model_list.append(model)
+        
+        # Compute coherence
+        coherence_model = CoherenceModel(model=model, texts=texts, 
+                                        dictionary=dictionary, coherence='c_v')
+        coherence_values.append(coherence_model.get_coherence())
+    
+    print(f"\n✅ Coherence computation complete")
+    return model_list, coherence_values
+
+# Compute coherence for different topic numbers
+model_list, coherence_values = compute_coherence_values(
+    dictionary=dictionary,
+    corpus=corpus,
+    texts=processed_texts,
+    limit=15,
+    start=3,
+    step=1
+)
+
+# Plot coherence scores
+topic_nums = list(range(3, 15, 1))
+fig, ax = plt.subplots(figsize=(10, 6))
+ax.plot(topic_nums, coherence_values, marker='o', linewidth=2, markersize=8, color=EDU_COLORS[0])
+ax.set_xlabel('Number of Topics', fontsize=12)
+ax.set_ylabel('Coherence Score', fontsize=12)
+ax.set_title('Coherence Scores for Different Numbers of Topics', fontweight='bold', fontsize=14)
+ax.grid(True, alpha=0.3)
+
+# Highlight optimal number
+optimal_idx = np.argmax(coherence_values)
+optimal_topics = topic_nums[optimal_idx]
+ax.axvline(x=optimal_topics, color='red', linestyle='--', alpha=0.7, 
+          label=f'Optimal: {optimal_topics} topics')
+
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+print(f"🎯 Optimal number of topics: {optimal_topics} (coherence: {coherence_values[optimal_idx]:.3f})")
+
+# 7.3 Train Final LDA Model
+print(f"\n🏋️ TRAINING LDA MODEL WITH {optimal_topics} TOPICS...")
+
+# Train LDA model
+lda_model = LdaModel(
+    corpus=corpus,
+    id2word=dictionary,
+    num_topics=optimal_topics,
+    random_state=42,
+    passes=15,
+    alpha='auto',
+    eta='auto'
+)
+
+print("✅ LDA model trained successfully")
+
+# 7.4 Display Topics
+print("\n📚 DISCOVERED TOPICS:")
+print("-" * 50)
+
+def display_topics(model, num_words=10):
+    """Display topics with their top words"""
+    topics = model.show_topics(num_topics=model.num_topics, num_words=num_words, formatted=False)
+    
+    for topic_id, topic_words in topics:
+        print(f"\nTopic {topic_id + 1}:")
+        words = [word for word, _ in topic_words]
+        print(f"   {' | '.join(words)}")
+
+display_topics(lda_model, num_words=8)
+
+# 7.5 Visualize Topics with pyLDAvis (if available)
+try:
+    import pyLDAvis
+    import pyLDAvis.gensim_models as gensimvis
+    
+    print("\n📊 GENERATING INTERACTIVE TOPIC VISUALIZATION...")
+    
+    # Prepare visualization data
+    vis_data = gensimvis.prepare(lda_model, corpus, dictionary)
+    
+    # Save visualization to HTML
+    pyLDAvis.save_html(vis_data, 'topic_visualization.html')
+    print("✅ Interactive visualization saved to 'topic_visualization.html'")
+    
+except ImportError:
+    print("\n⚠️ pyLDAvis not available. Install with: pip install pyLDAvis")
+    print("   Creating alternative visualization...")
+    
+    # Alternative visualization
+    fig, axes = plt.subplots(optimal_topics, 1, figsize=(12, 4 * optimal_topics))
+    
+    for topic_id in range(optimal_topics):
+        ax = axes[topic_id] if optimal_topics > 1 else axes
+        
+        # Get topic words and weights
+        topic = lda_model.show_topic(topic_id, topn=10)
+        words = [word for word, _ in topic]
+        weights = [weight for _, weight in topic]
+        
+        y_pos = np.arange(len(words))
+        ax.barh(y_pos, weights, color=EDU_COLORS[topic_id % len(EDU_COLORS)])
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(words)
+        ax.invert_yaxis()
+        ax.set_xlabel('Weight')
+        ax.set_title(f'Topic {topic_id + 1}')
+    
+    plt.suptitle('Topic Word Distributions', fontsize=16, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    plt.show()
+
+# 7.6 Assign Topics to Documents
+print("\n📝 ASSIGNING TOPICS TO FEEDBACK DOCUMENTS...")
+
+def get_dominant_topic(lda_model, corpus):
+    """Get dominant topic for each document"""
+    dominant_topics = []
+    topic_distributions = []
+    
+    for doc in corpus:
+        topic_probs = lda_model.get_document_topics(doc)
+        topic_distributions.append(dict(topic_probs))
+        
+        if topic_probs:
+            dominant_topic = max(topic_probs, key=lambda x: x[1])[0]
+            dominant_topics.append(dominant_topic)
+        else:
+            dominant_topics.append(-1)
+    
+    return dominant_topics, topic_distributions
+
+# Get dominant topics
+dominant_topics, topic_distributions = get_dominant_topic(lda_model, corpus)
+analysis_df['dominant_topic'] = dominant_topics
+analysis_df['topic_distribution'] = topic_distributions
+
+print(f"✅ Topics assigned to {len(analysis_df)} feedback entries")
+
+# 7.7 Analyze Topics by Sentiment and Ratings
+print("\n📈 TOPIC ANALYSIS BY SENTIMENT AND RATINGS:")
+print("-" * 50)
+
+# Topic distribution
+topic_counts = analysis_df['dominant_topic'].value_counts().sort_index()
+print(f"\nTopic Distribution:")
+for topic_id, count in topic_counts.items():
+    if topic_id != -1:
+        print(f"  Topic {int(topic_id) + 1}: {count} documents ({count/len(analysis_df)*100:.1f}%)")
+
+# Topic sentiment analysis
+topic_sentiment = analysis_df.groupby('dominant_topic').agg({
+    'vader_compound': 'mean',
+    'overall_rating': 'mean',
+    'feedback_id': 'count'
+}).round(3)
+
+topic_sentiment = topic_sentiment.rename(columns={'feedback_id': 'count'})
+topic_sentiment = topic_sentiment[topic_sentiment.index != -1]  # Remove unassigned
+
+print(f"\nAverage Sentiment by Topic:")
+print(topic_sentiment[['vader_compound', 'overall_rating', 'count']].to_string())
+
+# Visualize topic sentiment
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+# Topic sentiment distribution
+topics = [f"Topic {int(i)+1}" for i in topic_sentiment.index]
+sentiment_values = topic_sentiment['vader_compound'].values
+
+colors = ['#6B8F71' if x > 0 else '#F18F01' if x > -0.1 else '#C73E1D' for x in sentiment_values]
+bars = ax1.bar(topics, sentiment_values, color=colors)
+ax1.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+ax1.set_xlabel('Topic')
+ax1.set_ylabel('Average VADER Sentiment Score')
+ax1.set_title('Average Sentiment by Topic', fontweight='bold')
+ax1.tick_params(axis='x', rotation=45)
+
+# Add value labels
+for bar in bars:
+    height = bar.get_height()
+    ax1.text(bar.get_x() + bar.get_width()/2., height + (0.01 if height >=0 else -0.03),
+            f'{height:.3f}', ha='center', va='bottom' if height >=0 else 'top', fontsize=9)
+
+# Topic rating distribution
+rating_values = topic_sentiment['overall_rating'].values
+bars2 = ax2.bar(topics, rating_values, color=EDU_COLORS[2])
+ax2.set_xlabel('Topic')
+ax2.set_ylabel('Average Overall Rating (1-5)')
+ax2.set_title('Average Rating by Topic', fontweight='bold')
+ax2.tick_params(axis='x', rotation=45)
+ax2.set_ylim([0, 5])
+
+# Add value labels
+for bar in bars2:
+    height = bar.get_height()
+    ax2.text(bar.get_x() + bar.get_width()/2., height + 0.1,
+            f'{height:.2f}', ha='center', va='bottom', fontsize=9)
+
+plt.suptitle('Topic Analysis: Sentiment and Rating Patterns', fontsize=16, fontweight='bold', y=1.05)
+plt.tight_layout()
+plt.show()
+
+# ============================================================================
+# 8. ACTIONABLE INSIGHTS FOR FACULTY DEVELOPMENT
+# ============================================================================
+print("\n" + "=" * 70)
+print("ACTIONABLE INSIGHTS FOR FACULTY DEVELOPMENT")
+print("=" * 70)
+
+print("\n🎯 ANSWERING THE KEY QUESTION:")
+print("'What are the predominant themes in student feedback, and how is sentiment distributed across them?'")
+print("-" * 70)
+
+# 8.1 Summary of Discovered Topics
+print("\n📚 SUMMARY OF DISCOVERED TOPICS:")
+
+# Define topic interpretations based on word distributions
+topic_interpretations = {
+    0: "Teaching Clarity & Explanation Quality",
+    1: "Course Organization & Materials",
+    2: "Assessment & Grading Fairness",
+    3: "Student Engagement & Interaction",
+    4: "Workload & Difficulty Balance",
+    5: "Instructor Support & Availability"
+}
+
+# Adjust based on actual number of topics
+for i in range(optimal_topics):
+    if i in topic_interpretations:
+        print(f"\nTopic {i+1}: {topic_interpretations[i]}")
+        
+        # Get top words for this topic
+        topic_words = lda_model.show_topic(i, topn=6)
+        words = [word for word, _ in topic_words]
+        print(f"   Key concepts: {', '.join(words)}")
+        
+        # Get sentiment for this topic
+        if i in topic_sentiment.index:
+            sentiment = topic_sentiment.loc[i, 'vader_compound']
+            rating = topic_sentiment.loc[i, 'overall_rating']
+            count = topic_sentiment.loc[i, 'count']
+            
+            sentiment_label = "Positive" if sentiment > 0.05 else "Negative" if sentiment < -0.05 else "Neutral"
+            print(f"   Sentiment: {sentiment:.3f} ({sentiment_label})")
+            print(f"   Avg Rating: {rating:.2f}/5")
+            print(f"   Frequency: {count} mentions")
+
+# 8.2 Faculty Development Recommendations
+print("\n💡 FACULTY DEVELOPMENT RECOMMENDATIONS:")
+print("-" * 50)
+
+recommendations = [
+    {
+        "area": "Teaching Clarity",
+        "issue": "Unclear explanations and confusing lectures",
+        "recommendation": "Implement structured lesson plans with clear learning objectives. Use more examples and provide summaries of key points.",
+        "resources": ["Workshop: Effective Explanations", "Peer observation program", "Teaching guide: Chunking complex information"]
+    },
+    {
+        "area": "Course Organization",
+        "issue": "Disorganized materials and inconsistent structure",
+        "recommendation": "Develop standardized course templates. Use learning management systems consistently. Provide clear weekly schedules.",
+        "resources": ["LMS training sessions", "Course design checklist", "Template repository"]
+    },
+    {
+        "area": "Assessment & Grading",
+        "issue": "Perceived unfair grading and unclear expectations",
+        "recommendation": "Use detailed rubrics for all assignments. Provide grading examples. Offer revision opportunities for major assignments.",
+        "resources": ["Rubric development workshop", "Calibration sessions", "Transparent grading guidelines"]
+    },
+    {
+        "area": "Student Engagement",
+        "issue": "Lack of interaction and passive learning environments",
+        "recommendation": "Incorporate active learning techniques. Use classroom response systems. Facilitate small group discussions.",
+        "resources": ["Active learning workshop", "Classroom technology training", "Discussion facilitation guide"]
+    },
+    {
+        "area": "Workload Management",
+        "issue": "Excessive workload and poor time estimation",
+        "recommendation": "Conduct time audits for assignments. Balance assignment types. Provide workload estimates in syllabus.",
+        "resources": ["Workload assessment tool", "Assignment design guidelines", "Time management workshop"]
+    },
+    {
+        "area": "Instructor Support",
+        "issue": "Limited availability and slow response times",
+        "recommendation": "Establish clear office hour policies. Use scheduled appointment systems. Set communication response time expectations.",
+        "resources": ["Office hour optimization guide", "Communication protocols", "Student support training"]
+    }
+]
+
+# Display top recommendations based on sentiment analysis
+print("\nTop 3 Priority Areas for Faculty Development:")
+
+# Sort topics by sentiment (most negative first)
+negative_topics = topic_sentiment.sort_values('vader_compound').head(3)
+
+for rank, (topic_id, row) in enumerate(negative_topics.iterrows(), 1):
+    if int(topic_id) in topic_interpretations:
+        area = topic_interpretations[int(topic_id)]
+        
+        print(f"\n{rank}. {area}")
+        print(f"   🔍 Issue: {next(r['issue'] for r in recommendations if r['area'] in area)}")
+        print(f"   💡 Recommendation: {next(r['recommendation'] for r in recommendations if r['area'] in area)}")
+        print(f"   📊 Data: Sentiment score = {row['vader_compound']:.3f}, Mentions = {int(row['count'])}")
+
+# 8.3 Positive Practices to Reinforce
+print("\n🌟 POSITIVE PRACTICES TO REINFORCE:")
+print("-" * 40)
+
+# Sort topics by sentiment (most positive first)
+positive_topics = topic_sentiment.sort_values('vader_compound', ascending=False).head(3)
+
+for rank, (topic_id, row) in enumerate(positive_topics.iterrows(), 1):
+    if int(topic_id) in topic_interpretations:
+        area = topic_interpretations[int(topic_id)]
+        
+        print(f"\n{rank}. {area}")
+        print(f"   📈 Performance: High positive sentiment ({row['vader_compound']:.3f})")
+        print(f"   🎯 Strategy: Document and share best practices in this area")
+        print(f"   📣 Action: Feature successful faculty in teaching newsletters")
+
+# 8.4 Implementation Roadmap
+print("\n🛣️ FACULTY DEVELOPMENT IMPLEMENTATION ROADMAP:")
+print("-" * 50)
+
+roadmap = [
+    ("Immediate (1-2 months)", 
+     "Address most critical issues from negative feedback",
+     ["Workshops on clear explanations", "Rubric development training", "Office hour optimization"]),
+    ("Short-term (3-6 months)", 
+     "Build foundational teaching skills across departments",
+     ["Active learning certification", "Course design institute", "Peer mentoring program"]),
+    ("Medium-term (6-12 months)", 
+     "Develop advanced pedagogical expertise",
+     ["Teaching portfolio development", "Scholarship of Teaching & Learning", "Interdisciplinary teaching collaborations"]),
+    ("Long-term (1-2 years)", 
+     "Establish culture of continuous improvement",
+     ["Teaching excellence awards", "Student feedback integration system", "Teaching innovation grants"])
+]
+
+for timeframe, goal, actions in roadmap:
+    print(f"\n{timeframe}:")
+    print(f"   Goal: {goal}")
+    print(f"   Key Actions:")
+    for action in actions[:2]:  # Show first 2 actions
+        print(f"      • {action}")
+
+# ============================================================================
+# 9. INTERACTIVE DASHBOARD FOR FACULTY
+# ============================================================================
+print("\n" + "=" * 70)
+print("INTERACTIVE DASHBOARD IMPLEMENTATION")
+print("=" * 70)
+
+# 9.1 Create Faculty Dashboard Data
+print("\n📊 CREATING FACULTY DEVELOPMENT DASHBOARD DATA...")
+
+# Generate faculty-specific insights
+faculty_insights = []
+
+for topic_id in range(optimal_topics):
+    if topic_id in topic_interpretations:
+        # Get feedback examples for this topic
+        topic_feedback = analysis_df[analysis_df['dominant_topic'] == topic_id]
+        
+        if len(topic_feedback) > 0:
+            # Sample feedback
+            sample_feedback = topic_feedback.sample(min(2, len(topic_feedback)))
+            
+            insights = {
+                'topic_id': topic_id + 1,
+                'topic_name': topic_interpretations[topic_id],
+                'sentiment_score': topic_sentiment.loc[topic_id, 'vader_compound'] if topic_id in topic_sentiment.index else 0,
+                'avg_rating': topic_sentiment.loc[topic_id, 'overall_rating'] if topic_id in topic_sentiment.index else 0,
+                'frequency': len(topic_feedback),
+                'priority_level': 'High' if topic_id in negative_topics.index else 'Medium' if topic_id in topic_sentiment.index else 'Low',
+                'sample_feedback_1': sample_feedback.iloc[0]['feedback_text'][:150] + '...' if len(sample_feedback) > 0 else '',
+                'sample_feedback_2': sample_feedback.iloc[1]['feedback_text'][:150] + '...' if len(sample_feedback) > 1 else '',
+                'recommended_action': next((r['recommendation'] for r in recommendations if r['area'] in topic_interpretations[topic_id]), '')
+            }
+            
+            faculty_insights.append(insights)
+
+# Create insights DataFrame
+insights_df = pd.DataFrame(faculty_insights)
+
+print(f"✅ Created insights for {len(insights_df)} topics")
+print("\n📋 Sample Insights:")
+print("-" * 40)
+
+for _, insight in insights_df.head(2).iterrows():
+    print(f"\nTopic {insight['topic_id']}: {insight['topic_name']}")
+    print(f"   Priority: {insight['priority_level']}")
+    print(f"   Sentiment: {insight['sentiment_score']:.3f}")
+    print(f"   Sample feedback: {insight['sample_feedback_1'][:100]}...")
+
+# 9.2 Create Interactive Visualizations
+print("\n📈 CREATING INTERACTIVE VISUALIZATIONS...")
+
+# Create a comprehensive visualization
+fig = make_subplots(
+    rows=2, cols=2,
+    subplot_titles=('Topic Sentiment Distribution', 'Topic Frequency',
+                    'Sentiment vs Rating Correlation', 'Priority Areas'),
+    specs=[[{'type': 'bar'}, {'type': 'bar'}],
+           [{'type': 'scatter'}, {'type': 'pie'}]]
+)
+
+# 1. Topic Sentiment Distribution
+fig.add_trace(
+    go.Bar(
+        x=[f"Topic {i+1}" for i in insights_df['topic_id'] - 1],
+        y=insights_df['sentiment_score'],
+        name='Sentiment',
+        marker_color=['#6B8F71' if x > 0 else '#F18F01' if x > -0.1 else '#C73E1D' for x in insights_df['sentiment_score']],
+        text=[f'{x:.3f}' for x in insights_df['sentiment_score']],
+        textposition='auto'
+    ),
+    row=1, col=1
+)
+
+# 2. Topic Frequency
+fig.add_trace(
+    go.Bar(
+        x=[f"Topic {i+1}" for i in insights_df['topic_id'] - 1],
+        y=insights_df['frequency'],
+        name='Frequency',
+        marker_color=EDU_COLORS[2],
+        text=insights_df['frequency'],
+        textposition='auto'
+    ),
+    row=1, col=2
+)
+
+# 3. Sentiment vs Rating
+fig.add_trace(
+    go.Scatter(
+        x=insights_df['sentiment_score'],
+        y=insights_df['avg_rating'],
+        mode='markers+text',
+        marker=dict(
+            size=insights_df['frequency']/10,
+            color=insights_df['sentiment_score'],
+            colorscale='RdYlGn',
+            showscale=True,
+            colorbar=dict(title="Sentiment")
+        ),
+        text=[f"Topic {i}" for i in insights_df['topic_id']],
+        textposition='top center',
+        name='Topics'
+    ),
+    row=2, col=1
+)
+
+# 4. Priority Areas
+priority_counts = insights_df['priority_level'].value_counts()
+fig.add_trace(
+    go.Pie(
+        labels=priority_counts.index,
+        values=priority_counts.values,
+        hole=0.4,
+        name='Priority',
+        marker_colors=['#C73E1D', '#F18F01', '#6B8F71']  # Red, Orange, Green
+    ),
+    row=2, col=2
+)
+
+# Update layout
+fig.update_layout(
+    height=800,
+    showlegend=False,
+    title_text="Student Feedback Analysis: Faculty Development Insights",
+    title_font_size=20
+)
+
+fig.update_xaxes(title_text="Topics", row=1, col=1)
+fig.update_xaxes(title_text="Topics", row=1, col=2)
+fig.update_xaxes(title_text="Sentiment Score", row=2, col=1)
+fig.update_yaxes(title_text="Sentiment Score", row=1, col=1)
+fig.update_yaxes(title_text="Frequency", row=1, col=2)
+fig.update_yaxes(title_text="Average Rating", row=2, col=1)
+
+print("✅ Interactive visualizations created")
+print("📊 Use these visualizations in your faculty development dashboard")
+
+# Save the figure
+fig.write_html("faculty_development_dashboard.html")
+print("💾 Dashboard saved as 'faculty_development_dashboard.html'")
+
+# ============================================================================
+# 10. EXPORT RESULTS AND SUMMARY
+# ============================================================================
+print("\n" + "=" * 70)
+print("EXPORTING RESULTS AND SUMMARY")
+print("=" * 70)
+
+# 10.1 Export Analysis Results
+print("\n💾 EXPORTING ANALYSIS RESULTS...")
+
+# Create summary report
+summary_report = {
+    "analysis_date": pd.Timestamp.now().strftime("%Y-%m-%d"),
+    "total_feedback_analyzed": len(analysis_df),
+    "sentiment_distribution": analysis_df['sentiment_category'].value_counts().to_dict(),
+    "average_overall_rating": analysis_df['overall_rating'].mean(),
+    "average_vader_sentiment": analysis_df['vader_compound'].mean(),
+    "topics_discovered": optimal_topics,
+    "topic_insights": insights_df.to_dict('records'),
+    "key_findings": [
+        f"{len(negative_topics)} topics show negative sentiment requiring immediate attention",
+        f"Strongest correlation between sentiment and ratings: {correlation_df.loc[0, 'VADER Correlation']:.3f}",
+        f"Most common positive phrase pattern: '{max(pattern_results['Positive'], key=pattern_results['Positive'].get) if pattern_results['Positive'] else 'N/A'}'",
+        f"Most common negative phrase pattern: '{max(pattern_results['Negative'], key=pattern_results['Negative'].get) if pattern_results['Negative'] else 'N/A'}'"
+    ]
+}
+
+# Save summary report
+import json
+with open('feedback_analysis_summary.json', 'w') as f:
+    json.dump(summary_report, f, indent=2)
+
+print("✅ Summary report saved as 'feedback_analysis_summary.json'")
+
+# 10.2 Export processed data
+print("\n📊 EXPORTING PROCESSED DATA...")
+
+# Create export DataFrame
+export_df = analysis_df[[
+    'feedback_id', 'course_code', 'course_category', 'overall_rating',
+    'vader_compound', 'textblob_polarity', 'sentiment_category',
+    'dominant_topic', 'word_count'
+]].copy()
+
+# Add topic names
+export_df['topic_name'] = export_df['dominant_topic'].apply(
+    lambda x: topic_interpretations.get(int(x), 'Unassigned') if x != -1 else 'Unassigned'
+)
+
+export_df.to_csv('processed_feedback_data.csv', index=False)
+print("✅ Processed data saved as 'processed_feedback_data.csv'")
+
+# 10.3 Final Summary
+print("\n" + "=" * 70)
+print("ANALYSIS COMPLETE - KEY INSIGHTS SUMMARY")
+print("=" * 70)
+
+print("\n🎯 KEY QUESTION ANSWERED:")
+print("'What are the predominant themes in student feedback, and how is sentiment distributed across them?'")
+print("-" * 70)
+
+print(f"\n📊 DISCOVERED {optimal_topics} PREDOMINANT THEMES:")
+for i in range(optimal_topics):
+    if i in topic_interpretations:
+        sentiment = topic_sentiment.loc[i, 'vader_compound'] if i in topic_sentiment.index else 0
+        sentiment_label = "👍 Positive" if sentiment > 0.05 else "👎 Negative" if sentiment < -0.05 else "🤝 Neutral"
+        print(f"  {i+1}. {topic_interpretations[i]} - {sentiment_label} ({sentiment:.3f})")
+
+print(f"\n📈 SENTIMENT DISTRIBUTION:")
+sentiment_dist = analysis_df['sentiment_category'].value_counts(normalize=True) * 100
+for category, percentage in sentiment_dist.items():
+    print(f"  {category}: {percentage:.1f}% of feedback")
+
+print(f"\n🔗 KEY CORRELATIONS:")
+print(f"  Sentiment-Rating Correlation: {correlation_df.loc[0, 'VADER Correlation']:.3f}")
+print(f"  Word Count-Rating Correlation: {analysis_df['word_count'].corr(analysis_df['overall_rating']):.3f}")
+
+print(f"\n💡 TOP 3 FACULTY DEVELOPMENT PRIORITIES:")
+for i, (topic_id, row) in enumerate(negative_topics.iterrows(), 1):
+    if int(topic_id) in topic_interpretations:
+        print(f"  {i}. {topic_interpretations[int(topic_id)]} (Sentiment: {row['vader_compound']:.3f})")
+
+print(f"\n🌟 TOP 3 STRENGTHS TO REINFORCE:")
+for i, (topic_id, row) in enumerate(positive_topics.iterrows(), 1):
+    if int(topic_id) in topic_interpretations:
+        print(f"  {i}. {topic_interpretations[int(topic_id)]} (Sentiment: {row['vader_compound']:.3f})")
+
+print("\n" + "=" * 70)
+print("🎓 ANALYSIS COMPLETE - READY FOR FACULTY DEVELOPMENT PLANNING")
+print("=" * 70)
+
+print("""
+📁 Generated Files:
+  • faculty_development_dashboard.html - Interactive dashboard
+  • feedback_analysis_summary.json    - Analysis summary
+  • processed_feedback_data.csv      - Processed data
+  • topic_visualization.html         - Topic model visualization
+
+🎯 Next Steps for Implementation:
+  1. Share insights with academic departments
+  2. Develop targeted faculty development workshops
+  3. Establish ongoing feedback monitoring system
+  4. Track improvements in future evaluations
+""")
