@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  school-finder:
+    build: .
+    container_name: school-finder-dashboard
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./assets:/app/assets
+    environment:
+      - PYTHONPATH=/app
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_THEME_BASE=light
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional data updater service
+  data-updater:
+    image: python:3.10-slim
+    container_name: school-data-updater
+    volumes:
+      - ./data:/app/data
+      - ./src/data_updater.py:/app/data_updater.py
+    command: >
+      sh -c "pip install requests pandas && 
+             python /app/data_updater.py &&
+             echo 'Data update complete'"
+    restart: "no"
+    depends_on:
+      - school-finder
